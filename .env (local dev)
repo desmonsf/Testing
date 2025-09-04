@@ -1,0 +1,21 @@
+# =====================================
+# .env (local dev)
+# =====================================
+"""
+# WhatsApp Cloud API
+WHATSAPP_ACCESS_TOKEN=your_whatsapp_access_token
+WHATSAPP_VERIFY_TOKEN=your_custom_verify_token
+WHATSAPP_PHONE_NUMBER_ID=your_phone_number_id
+WHATSAPP_BUSINESS_ACCOUNT_ID=your_business_account_id
+
+# OpenAI
+OPENAI_API_KEY=your_openai_api_key
+
+# Database (Railway auto-génère en production)
+DATABASE_URL=sqlite:///./facturation_coach.db
+
+# App
+SECRET_KEY=your-secret-key-here
+DEBUG=True
+PORT=8000
+"""
