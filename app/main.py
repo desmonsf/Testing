@@ -84,44 +84,33 @@ async def sleep_middleware(request, call_next):
     return await call_next(request)
 
 @app.get("/")
-async def root():
+async def webhook_verify_and_home(request: Request):
+    """Vérification webhook WhatsApp + Page d'accueil"""
+    
+    # Vérifier si c'est une vérification webhook WhatsApp
+    query_params = request.query_params
+    mode = query_params.get("hub.mode")
+    token = query_params.get("hub.verify_token") 
+    challenge = query_params.get("hub.challenge")
+    
+    # Si c'est une vérification webhook
+    if mode == "subscribe" and token == os.getenv("WHATSAPP_VERIFY_TOKEN"):
+        logger.info("Webhook WhatsApp vérifié avec succès")
+        return PlainTextResponse(challenge)
+    
+    # Sinon, page d'accueil normale
     return {
         "message": "Coach Facturation IA - API opérationnelle",
         "status": "veille" if sleep_scheduler.is_sleep_time() else "actif",
         "horaires": "8h - 00h (heure française)"
     }
 
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy", 
-        "service": "facturation-coach",
-        "time": "veille" if sleep_scheduler.is_sleep_time() else "actif"
-    }
-
-@app.get("/webhook/whatsapp")
-async def whatsapp_webhook_verify(request: Request):
-    """Vérification du webhook WhatsApp Cloud API"""
-    query_params = request.query_params
-    mode = query_params.get("hub.mode")
-    token = query_params.get("hub.verify_token") 
-    challenge = query_params.get("hub.challenge")
-    
-    challenge_response = whatsapp_handler.verify_webhook(mode, token, challenge)
-    
-    if challenge_response:
-        logger.info("Webhook WhatsApp vérifié avec succès")
-        return PlainTextResponse(challenge_response)
-    else:
-        logger.warning("Échec vérification webhook WhatsApp")
-        raise HTTPException(status_code=403, detail="Forbidden")
-
-@app.post("/webhook/whatsapp")
-async def whatsapp_webhook_message(request: Request):
-    """Webhook WhatsApp Cloud API - Traitement des messages"""
+@app.post("/")
+async def webhook_message_handler(request: Request):
+    """Traitement des messages WhatsApp"""
     try:
         webhook_data = await request.json()
-        logger.info(f"Webhook reçu: {webhook_data}")
+        logger.info(f"Message WhatsApp reçu: {webhook_data}")
         
         parsed_message = whatsapp_handler.parse_webhook_message(webhook_data)
         
@@ -154,6 +143,14 @@ async def whatsapp_webhook_message(request: Request):
     except Exception as e:
         logger.error(f"Erreur webhook WhatsApp: {str(e)}")
         return PlainTextResponse("Error", status_code=500)
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy", 
+        "service": "facturation-coach",
+        "time": "veille" if sleep_scheduler.is_sleep_time() else "actif"
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
