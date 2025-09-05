@@ -2,14 +2,12 @@
 # app/main.py
 # =====================================
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, JSONResponse
 import os
 from dotenv import load_dotenv
 from .database import init_db
 from .whatsapp import WhatsAppHandler
 from .ai_coach import FacturationCoach
-from .scheduler import SleepScheduler
-from .models import PendingMessage
 from .database import get_db_sync
 import logging
 
@@ -28,60 +26,12 @@ app = FastAPI(
 # Initialize services
 whatsapp_handler = WhatsAppHandler()
 ai_coach = FacturationCoach()
-sleep_scheduler = SleepScheduler()
 
 # Initialize database on startup
 @app.on_event("startup")
 async def startup_event():
     init_db()
     logger.info("Application démarrée - Base de données initialisée")
-
-@app.middleware("http")
-async def sleep_middleware(request, call_next):
-    """Middleware pour gérer les horaires de veille"""
-    # Exceptions: santé et vérification webhook
-    if request.url.path in ["/health"] or (
-        request.url.path == "/webhook/whatsapp" and request.method == "GET"
-    ):
-        return await call_next(request)
-    
-    # Vérifier si c'est l'heure de veille
-    if sleep_scheduler.is_sleep_time():
-        if request.url.path == "/webhook/whatsapp" and request.method == "POST":
-            # Stocker le message pour traitement au réveil
-            try:
-                webhook_data = await request.json()
-                parsed_message = whatsapp_handler.parse_webhook_message(webhook_data)
-                
-                if parsed_message:
-                    db = get_db_sync()
-                    pending = PendingMessage(
-                        user_phone=parsed_message["from"],
-                        message=parsed_message["body"],
-                        media_url=parsed_message["media_url"]
-                    )
-                    db.add(pending)
-                    db.commit()
-                    db.close()
-                    
-                    # Envoyer message de veille
-                    await whatsapp_handler.send_message(
-                        to=parsed_message["from"],
-                        message=sleep_scheduler.get_sleep_message()
-                    )
-                    
-                logger.info("Message stocké pour traitement au réveil")
-            except Exception as e:
-                logger.error(f"Erreur stockage message: {str(e)}")
-            
-            return PlainTextResponse("OK", status_code=200)
-        else:
-            raise HTTPException(
-                status_code=503, 
-                detail="Service en pause nocturne. Actif de 8h à minuit."
-            )
-    
-    return await call_next(request)
 
 @app.get("/")
 async def webhook_verify_and_home(request: Request):
@@ -99,11 +49,11 @@ async def webhook_verify_and_home(request: Request):
         return PlainTextResponse(challenge)
     
     # Sinon, page d'accueil normale
-    return {
+    return JSONResponse({
         "message": "Coach Facturation IA - API opérationnelle",
-        "status": "veille" if sleep_scheduler.is_sleep_time() else "actif",
-        "horaires": "8h - 00h (heure française)"
-    }
+        "status": "actif",
+        "service": "facturation-coach"
+    })
 
 @app.post("/")
 async def webhook_message_handler(request: Request):
@@ -143,13 +93,15 @@ async def webhook_message_handler(request: Request):
     except Exception as e:
         logger.error(f"Erreur webhook WhatsApp: {str(e)}")
         return PlainTextResponse("Error", status_code=500)
+
 @app.get("/health")
 async def health_check():
-    return {
+    """Endpoint de santé pour UptimeRobot"""
+    return JSONResponse({
         "status": "healthy", 
         "service": "facturation-coach",
-        "time": "veille" if sleep_scheduler.is_sleep_time() else "actif"
-    }
+        "message": "Service opérationnel"
+    })
 
 
 if __name__ == "__main__":
