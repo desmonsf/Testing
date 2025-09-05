@@ -12,7 +12,8 @@ WHATSAPP_BUSINESS_ACCOUNT_ID=1427276108356393
 OPENAI_API_KEY=your_openai_api_key
 
 # Database (Railway auto-génère en production)
-DATABASE_URL=sqlite:///./facturation_coach.db
+#DATABASE_URL=sqlite:///./facturation_coach.db
+DATABASE_URL=https://ytjbnxruyhlpseqnvrto.supabase.co
 
 # App
 SECRET_KEY=your-secret-key-here
