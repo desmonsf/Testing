@@ -103,6 +103,9 @@ async def health_check():
         "message": "Service opérationnel"
     })
 
+@app.head("/health")
+async def health_head():
+    return PlainTextResponse("", status_code=200)
 
 if __name__ == "__main__":
     import uvicorn
