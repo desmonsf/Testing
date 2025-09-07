@@ -6,7 +6,7 @@ import requests
 from typing import Optional
 import logging
 import json
-import hashlib  # <-- LOG: pour empreinte du token
+import hashlib  # LOG: empreinte du token
 
 logger = logging.getLogger(__name__)
 
@@ -17,25 +17,25 @@ class WhatsAppHandler:
         self.phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
         self.business_account_id = os.getenv("WHATSAPP_BUSINESS_ACCOUNT_ID")
         
-        # NOTE: on garde ta version actuelle (v18.0), on la log juste
+        # NOTE: on ne change pas ta version (v18.0), on la LOG uniquement
         self.base_url = f"https://graph.facebook.com/v18.0/{self.phone_number_id}"
         
         if not all([self.access_token, self.phone_number_id]):
             logger.warning("Configuration WhatsApp Cloud API incomplète")
         else:
-            # LOG: infos de démarrage utiles
+            # ==== LOGS D'INITIALISATION UTILES ====
             token_preview = self.access_token or ""
             fp = hashlib.sha256(token_preview.encode()).hexdigest()[:10]
             has_ws = (token_preview != token_preview.strip())
-            logger.info(
-                "[WA:init] phone_number_id=%s | base_url=%s | token_len=%d | token_fp=%s | token_prefix=%s | token_has_leading_trailing_ws=%s",
-                self.phone_number_id, self.base_url, len(token_preview), fp, token_preview[:3], has_ws
+            logger.warning(  # WARNING pour être sûr que ça s'affiche
+                "[WA:init] base_url=%s | phone_number_id=%s | token_len=%d | token_fp=%s | token_prefix=%s | token_has_ws_edges=%s",
+                self.base_url, self.phone_number_id, len(token_preview), fp, token_preview[:3], has_ws
             )
             if has_ws or token_preview.endswith("\n"):
-                logger.warning("[WA:init] Le token semble contenir des espaces ou des retours de ligne en bordure")
+                logger.warning("[WA:init] Le token semble contenir des espaces/retours de ligne en bordure")
 
             if "v18.0" in self.base_url:
-                logger.info("[WA:init] API version détectée: v18.0 (simplement informatif)")
+                logger.warning("[WA:init] API version détectée: v18.0 (info)")
 
     async def send_message(self, to: str, message: str) -> bool:
         """Envoie un message WhatsApp via Cloud API"""
@@ -57,43 +57,39 @@ class WhatsAppHandler:
             "type": "text",
             "text": {"body": message}
         }
-
-        # LOG: avant l’appel
-        logger.info("[WA:send] POST %s | to_raw=%s | to_clean=%s", url, to, clean_to)
-        logger.debug("[WA:send] payload=%s", json.dumps(data, ensure_ascii=False))
+        
+        # ==== LOG AVANT APPEL ====
+        try:
+            payload_txt = json.dumps(data, ensure_ascii=False)
+        except Exception:
+            payload_txt = "<payload non sérialisable>"
+        logger.warning("[WA:send] POST %s | to_raw=%s | to_clean=%s | payload=%s", url, to, clean_to, payload_txt)
 
         try:
             response = requests.post(url, headers=headers, json=data, timeout=30)
 
-            # LOG: on trace toujours le statut + corps (utile pour 401/4xx)
+            # ==== LOG APRÈS APPEL (toujours) ====
             try:
                 body_text = response.text
             except Exception:
                 body_text = "<no-text>"
+            logger.warning("[WA:send] status=%s | ok=%s", response.status_code, response.ok)
+            logger.warning("[WA:send] response_body=%s", body_text)
 
-            logger.info("[WA:send] status=%s", response.status_code)
-            logger.debug("[WA:send] response_body=%s", body_text)
-
-            # si erreur HTTP, on logge le corps exact avant de raise
-            if not response.ok:
-                logger.error("[WA:send] HTTP error body: %s", body_text)
-                response.raise_for_status()
-
+            # Si erreur HTTP, on log déjà le corps exact, puis on raise pour conserver le comportement actuel
+            response.raise_for_status()
+            
             result = response.json()
-            logger.info(
-                "Message envoyé - ID: %s",
-                result.get('messages', [{}])[0].get('id', 'unknown')
-            )
+            logger.info("Message envoyé - ID: %s", result.get('messages', [{}])[0].get('id', 'unknown'))
             return True
-
+            
         except requests.HTTPError as e:
-            # LOG: détaille code + contenu
             status = getattr(e.response, "status_code", "unknown")
             text = getattr(e.response, "text", str(e))
             logger.error("[WA:send] HTTPError status=%s body=%s", status, text)
             return False
         except Exception as e:
-            logger.error(f"Erreur envoi WhatsApp: {str(e)}")
+            logger.error("Erreur envoi WhatsApp (Exception): %s", str(e))
             return False
     
     def verify_webhook(self, mode: str, token: str, challenge: str) -> Optional[str]:
@@ -108,8 +104,11 @@ class WhatsAppHandler:
     def parse_webhook_message(self, webhook_data: dict) -> Optional[dict]:
         """Parse les données du webhook WhatsApp"""
         try:
-            # LOG: trace les principaux champs reçus
-            logger.debug("[WA:webhook] payload_brut_keys=%s", list(webhook_data.keys()))
+            # LOG pour distinguer 'messages' vs 'statuses'
+            try:
+                logger.warning("[WA:webhook] keys=%s", list(webhook_data.keys()))
+            except Exception:
+                pass
 
             entry = webhook_data.get("entry", [{}])[0]
             changes = entry.get("changes", [{}])[0]
@@ -117,8 +116,7 @@ class WhatsAppHandler:
             
             messages = value.get("messages")
             if not messages:
-                # LOG: utile pour différencier 'statuses' vs 'messages'
-                logger.info("[WA:webhook] pas de 'messages' (peut être un status). value_keys=%s", list(value.keys()))
+                logger.warning("[WA:webhook] pas de 'messages' (probablement un status). value_keys=%s", list(value.keys()))
                 return None
                 
             message = messages[0]
@@ -138,11 +136,10 @@ class WhatsAppHandler:
                 parsed_data["media_url"] = message.get("image", {}).get("id")
                 parsed_data["body"] = message.get("image", {}).get("caption", "")
 
-            # LOG: résumé du message parsé
-            logger.info("[WA:webhook] parsed from=%s type=%s body_len=%d", parsed_data["from"], parsed_data["type"], len(parsed_data["body"] or ""))
+            logger.warning("[WA:webhook] parsed from=%s type=%s body_len=%d", parsed_data["from"], parsed_data["type"], len(parsed_data["body"] or ""))
 
             return parsed_data
             
         except Exception as e:
-            logger.error(f"Erreur parsing webhook: {str(e)}")
+            logger.error("Erreur parsing webhook: %s", str(e))
             return None
